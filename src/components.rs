@@ -28,3 +28,18 @@ impl Default for CircleCollider {
 
 #[derive(Component, Debug, Default)]
 pub struct Vel(pub(crate) Vec2);
+
+#[derive(Component, Debug, Default)]
+pub struct PreSolveVel(pub(crate) Vec2);
+
+#[derive(Default, Debug)]
+pub struct Contacts(pub Vec<(Entity, Entity)>);
+
+#[derive(Component, Debug)]
+pub struct Restitution(pub f32);
+
+impl Default for Restitution {
+    fn default() -> Self {
+        Self(0.3)
+    }
+}
