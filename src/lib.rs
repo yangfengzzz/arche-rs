@@ -36,6 +36,7 @@ pub fn startup(
         ..Default::default()
     });
 
+    // Left particle
     commands
         .spawn_bundle(PbrBundle {
             mesh: sphere.clone(),
@@ -43,8 +44,20 @@ pub fn startup(
             ..Default::default()
         })
         .insert_bundle(ParticleBundle::new_with_pos_and_vel(
-            Vec2::ZERO,
+            Vec2::new(-2., 0.),
             Vec2::new(2., 0.),
+        ));
+
+    // Right particle
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: sphere.clone(),
+            material: white.clone(),
+            ..Default::default()
+        })
+        .insert_bundle(ParticleBundle::new_with_pos_and_vel(
+            Vec2::new(2., 0.),
+            Vec2::new(-2., 0.),
         ));
 
     commands.spawn_bundle(OrthographicCameraBundle {
@@ -58,16 +71,37 @@ pub fn startup(
 }
 
 //--------------------------------------------------------------------------------------------------
-/// Moves objects in the physics world
-fn simulate(mut query: Query<(&mut Pos, &mut PrevPos, &Mass)>, gravity: Res<Gravity>) {
-    for (mut pos, mut prev_pos, mass) in query.iter_mut() {
+#[derive(SystemLabel, Debug, Hash, PartialEq, Eq, Clone)]
+enum Step {
+    CollectCollisionPairs,
+    Integrate,
+    SolvePositions,
+    UpdateVelocities,
+    SolveVelocities,
+}
+
+fn collect_collision_pairs() {}
+
+fn integrate(mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel, &Mass)>, gravity: Res<Gravity>) {
+    for (mut pos, mut prev_pos, mut vel, mass) in query.iter_mut() {
+        prev_pos.0 = pos.0;
+
         let gravitation_force = mass.0 * gravity.0;
         let external_forces = gravitation_force;
-        let velocity = (pos.0 - prev_pos.0) / DELTA_TIME + DELTA_TIME * external_forces / mass.0;
-        prev_pos.0 = pos.0;
-        pos.0 = pos.0 + velocity * DELTA_TIME;
+        vel.0 += DELTA_TIME * external_forces / mass.0;
+        pos.0 += DELTA_TIME * vel.0;
     }
 }
+
+fn solve_pos() {}
+
+fn update_vel(mut query: Query<(&Pos, &PrevPos, &mut Vel)>) {
+    for (pos, prev_pos, mut vel) in query.iter_mut() {
+        vel.0 = (pos.0 - prev_pos.0) / DELTA_TIME;
+    }
+}
+
+fn solve_vel() {}
 
 /// Copies positions from the physics world to bevy Transforms
 fn sync_transforms(mut query: Query<(&mut Transform, &Pos)>) {
@@ -87,8 +121,24 @@ impl Plugin for XPBDPlugin {
             FixedUpdateStage,
             SystemStage::parallel()
                 .with_run_criteria(FixedTimestep::step(DELTA_TIME as f64))
-                .with_system(simulate)
-                .with_system(sync_transforms),
+                .with_system(
+                    collect_collision_pairs
+                        .label(Step::CollectCollisionPairs)
+                        .before(Step::Integrate),
+                )
+                .with_system(integrate.label(Step::Integrate))
+                .with_system(solve_pos.label(Step::SolvePositions).after(Step::Integrate))
+                .with_system(
+                    update_vel
+                        .label(Step::UpdateVelocities)
+                        .after(Step::SolvePositions),
+                )
+                .with_system(
+                    solve_vel
+                        .label(Step::SolveVelocities)
+                        .after(Step::UpdateVelocities),
+                )
+                .with_system(sync_transforms.after(Step::SolveVelocities)),
         );
     }
 }
