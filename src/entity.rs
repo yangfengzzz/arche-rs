@@ -6,6 +6,7 @@ use crate::*;
 pub struct ParticleBundle {
     pub pos: Pos,
     pub prev_pos: PrevPos,
+    pub mass: Mass,
 }
 
 impl ParticleBundle {
@@ -13,6 +14,7 @@ impl ParticleBundle {
         Self {
             pos: Pos(pos),
             prev_pos: PrevPos(pos - vel * DELTA_TIME),
+            ..Default::default()
         }
     }
 }

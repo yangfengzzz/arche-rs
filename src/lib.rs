@@ -1,13 +1,22 @@
+mod components;
 mod entity;
+
+pub use components::*;
 pub use entity::*;
 
-use bevy::prelude::*;
+use bevy::{core::FixedTimestep, prelude::*};
 
-#[derive(Component, Debug, Default)]
-pub struct Pos(pub Vec2);
+#[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
+struct FixedUpdateStage;
 
-#[derive(Component, Debug, Default)]
-pub struct PrevPos(pub Vec2);
+#[derive(Debug)]
+pub struct Gravity(pub Vec2);
+
+impl Default for Gravity {
+    fn default() -> Self {
+        Self(Vec2::new(0., -9.81))
+    }
+}
 
 pub const DELTA_TIME: f32 = 1. / 60.;
 
@@ -50,9 +59,11 @@ pub fn startup(
 
 //--------------------------------------------------------------------------------------------------
 /// Moves objects in the physics world
-fn simulate(mut query: Query<(&mut Pos, &mut PrevPos)>) {
-    for (mut pos, mut prev_pos) in query.iter_mut() {
-        let velocity = (pos.0 - prev_pos.0) / DELTA_TIME;
+fn simulate(mut query: Query<(&mut Pos, &mut PrevPos, &Mass)>, gravity: Res<Gravity>) {
+    for (mut pos, mut prev_pos, mass) in query.iter_mut() {
+        let gravitation_force = mass.0 * gravity.0;
+        let external_forces = gravitation_force;
+        let velocity = (pos.0 - prev_pos.0) / DELTA_TIME + DELTA_TIME * external_forces / mass.0;
         prev_pos.0 = pos.0;
         pos.0 = pos.0 + velocity * DELTA_TIME;
     }
@@ -70,7 +81,14 @@ pub struct XPBDPlugin;
 
 impl Plugin for XPBDPlugin {
     fn build(&self, app: &mut App) {
-        app.add_system(simulate)
-            .add_system(sync_transforms);
+        app.init_resource::<Gravity>();
+        app.add_stage_before(
+            CoreStage::Update,
+            FixedUpdateStage,
+            SystemStage::parallel()
+                .with_run_criteria(FixedTimestep::step(DELTA_TIME as f64))
+                .with_system(simulate)
+                .with_system(sync_transforms),
+        );
     }
 }
