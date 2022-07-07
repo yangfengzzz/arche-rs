@@ -52,3 +52,18 @@ impl Default for Restitution {
         Self(0.3)
     }
 }
+
+#[derive(Component, Debug, Default)]
+pub struct Aabb {
+    pub(crate) min: Vec2,
+    pub(crate) max: Vec2,
+}
+
+impl Aabb {
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.max.x >= other.min.x
+            && self.max.y >= other.min.y
+            && self.min.x <= other.max.x
+            && self.min.y <= other.max.y
+    }
+}
