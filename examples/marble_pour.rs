@@ -66,16 +66,12 @@ fn startup(
         ..Default::default()
     });
 
-    let radius = 15.;
     let size = Vec2::new(10., 2.);
     commands
         .spawn_bundle(PbrBundle {
-            mesh: sphere.clone(),
+            mesh: meshes.add(Mesh::from(shape::Quad::new(Vec2::ONE))),
             material: blue.clone(),
-            transform: Transform {
-                scale: Vec3::splat(radius),
-                ..Default::default()
-            },
+            transform: Transform::from_scale(size.extend(1.)),
             ..Default::default()
         })
         .insert_bundle(StaticBoxBundle {

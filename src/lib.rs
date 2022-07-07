@@ -195,7 +195,7 @@ fn solve_pos_static_boxes(
 }
 
 fn solve_vel(
-    mut query: Query<(&mut Vel, &PreSolveVel, &Mass, &Restitution)>,
+    query: Query<(&mut Vel, &PreSolveVel, &Mass, &Restitution)>,
     contacts: Res<Contacts>,
 ) {
     for (entity_a, entity_b, n) in contacts.0.iter().cloned() {
@@ -204,7 +204,7 @@ fn solve_vel(
             (mut vel_b, pre_solve_vel_b, mass_b, restitution_b),
         ) = unsafe {
             // Ensure safety
-            assert!(entity_a != entity_b);
+            assert_ne!(entity_a, entity_b);
             (
                 query.get_unchecked(entity_a).unwrap(),
                 query.get_unchecked(entity_b).unwrap(),
