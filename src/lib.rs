@@ -1,12 +1,14 @@
 mod components;
+mod contact;
 mod entity;
 mod resources;
-mod contact;
 mod utils;
+mod rotation;
 
 pub use components::*;
 pub use entity::*;
 pub use resources::*;
+pub use rotation::*;
 use utils::*;
 use contact::Contact;
 

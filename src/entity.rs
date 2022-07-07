@@ -29,6 +29,7 @@ impl ParticleBundle {
 #[derive(Bundle, Default)]
 pub struct DynamicBoxBundle {
     pub pos: Pos,
+    pub rot: Rot,
     pub prev_pos: PrevPos,
     pub mass: Mass,
     pub collider: BoxCollider,
@@ -53,6 +54,7 @@ impl DynamicBoxBundle {
 #[derive(Bundle, Default)]
 pub struct StaticCircleBundle {
     pub pos: Pos,
+    pub rot: Rot,
     pub collider: CircleCollider,
     pub restitution: Restitution,
 }
@@ -60,6 +62,7 @@ pub struct StaticCircleBundle {
 #[derive(Bundle, Default)]
 pub struct StaticBoxBundle {
     pub pos: Pos,
+    pub rot: Rot,
     pub collider: BoxCollider,
     pub restitution: Restitution,
 }
