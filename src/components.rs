@@ -26,6 +26,18 @@ impl Default for CircleCollider {
     }
 }
 
+
+#[derive(Component, Debug)]
+pub struct BoxCollider {
+    pub size: Vec2,
+}
+
+impl Default for BoxCollider {
+    fn default() -> Self {
+        Self { size: Vec2::ONE }
+    }
+}
+
 #[derive(Component, Debug, Default)]
 pub struct Vel(pub(crate) Vec2);
 
@@ -33,10 +45,10 @@ pub struct Vel(pub(crate) Vec2);
 pub struct PreSolveVel(pub(crate) Vec2);
 
 #[derive(Default, Debug)]
-pub struct Contacts(pub Vec<(Entity, Entity)>);
+pub struct Contacts(pub Vec<(Entity, Entity, Vec2)>);
 
 #[derive(Default, Debug)]
-pub struct StaticContacts(pub Vec<(Entity, Entity)>);
+pub struct StaticContacts(pub Vec<(Entity, Entity, Vec2)>);
 
 #[derive(Component, Debug)]
 pub struct Restitution(pub f32);

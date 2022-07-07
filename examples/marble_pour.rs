@@ -67,6 +67,7 @@ fn startup(
     });
 
     let radius = 15.;
+    let size = Vec2::new(10., 2.);
     commands
         .spawn_bundle(PbrBundle {
             mesh: sphere.clone(),
@@ -77,9 +78,9 @@ fn startup(
             },
             ..Default::default()
         })
-        .insert_bundle(StaticColliderBundle {
-            pos: Pos(Vec2::new(0., -radius - 2.)),
-            collider: CircleCollider { radius },
+        .insert_bundle(StaticBoxBundle {
+            pos: Pos(Vec2::new(0., -3.)),
+            collider: BoxCollider { size },
             ..Default::default()
         });
 

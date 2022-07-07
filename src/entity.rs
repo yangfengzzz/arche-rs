@@ -26,8 +26,15 @@ impl ParticleBundle {
 
 //--------------------------------------------------------------------------------------------------
 #[derive(Bundle, Default)]
-pub struct StaticColliderBundle {
+pub struct StaticCircleBundle {
     pub pos: Pos,
     pub collider: CircleCollider,
+    pub restitution: Restitution,
+}
+
+#[derive(Bundle, Default)]
+pub struct StaticBoxBundle {
+    pub pos: Pos,
+    pub collider: BoxCollider,
     pub restitution: Restitution,
 }
