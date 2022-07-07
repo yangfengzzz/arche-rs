@@ -1,4 +1,5 @@
 use std::f32::consts::PI;
+use std::ops::{Add, AddAssign};
 use bevy::prelude::*;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
@@ -61,6 +62,25 @@ impl Rot {
 
     pub fn cos(self) -> f32 {
         self.cos
+    }
+}
+
+impl Add<Self> for Rot {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        self.mul(rhs)
+    }
+}
+
+impl AddAssign<Self> for Rot {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
+impl From<Rot> for f32 {
+    fn from(rot: Rot) -> Self {
+        rot.as_radians()
     }
 }
 

@@ -9,6 +9,8 @@ debug = true
 [dependencies]
 bevy = "0.6"
 rand = "0.8"
+parry2d = "0.8"
+nalgebra = { version = "0.30", features = ["convert-glam020"] }
 
 [dev-dependencies]
 approx = "0.5"

@@ -1,9 +1,21 @@
 use bevy::prelude::*;
+use nalgebra::UnitComplex;
+use parry2d::shape::Cuboid;
 use crate::Rot;
 
+#[derive(Debug, PartialEq)]
 pub struct Contact {
     pub penetration: f32,
     pub normal: Vec2,
+    pub r_a: Vec2,
+    pub r_b: Vec2,
+}
+
+fn make_isometry(rotation: Rot, translation: Vec2) -> parry2d::math::Isometry<f32> {
+    parry2d::math::Isometry::<f32> {
+        rotation: UnitComplex::new(rotation.into()),
+        translation: translation.into(),
+    }
 }
 
 pub fn ball_ball(pos_a: Vec2, radius_a: f32, pos_b: Vec2, radius_b: f32) -> Option<Contact> {
@@ -17,6 +29,8 @@ pub fn ball_ball(pos_a: Vec2, radius_a: f32, pos_b: Vec2, radius_b: f32) -> Opti
         Some(Contact {
             normal,
             penetration,
+            r_a: todo!(),
+            r_b: todo!(),
         })
     } else {
         None
@@ -55,6 +69,8 @@ pub fn ball_box(pos_a: Vec2, radius_a: f32, pos_b: Vec2, size_b: Vec2) -> Option
     Some(Contact {
         normal: n,
         penetration,
+        r_a: todo!(),
+        r_b: todo!(),
     })
 }
 
@@ -121,6 +137,8 @@ fn local_box_box(half_a: Vec2, ab: Vec2, rot_b: Rot, half_b: Vec2) -> Option<Con
     Some(Contact {
         penetration: min_penetration,
         normal: n,
+        r_a: todo!(),
+        r_b: todo!(),
     })
 }
 
@@ -132,30 +150,25 @@ pub fn box_box(
     rot_b: Rot,
     size_b: Vec2,
 ) -> Option<Contact> {
-    let half_a = size_a / 2.;
-    let half_b = size_b / 2.;
-    let ab = pos_b - pos_a;
-    let rot_ab = rot_a.inv().mul(rot_b);
-    if let Some(a_contact) = local_box_box(half_a, rot_a.inv().rotate(ab), rot_ab, half_b) {
-        // Check if there is a better separating axis along the other box' normals.
-        if let Some(b_contact) =
-        local_box_box(half_b, rot_b.inv().rotate(-ab), rot_ab.inv(), half_a)
-        {
-            if b_contact.penetration < a_contact.penetration {
-                return Some(Contact {
-                    penetration: b_contact.penetration,
-                    normal: rot_b.rotate(-b_contact.normal),
-                });
+    let pos1 = make_isometry(rot_a, pos_a);
+    let pos2 = make_isometry(rot_b, pos_b);
+    let cuboid1 = Cuboid::new((size_a / 2.).into());
+    let cuboid2 = Cuboid::new((size_b / 2.).into());
+    let contact = parry2d::query::contact::contact(&pos1, &cuboid1, &pos2, &cuboid2, 0.0).unwrap();
+    match contact {
+        Some(c) => {
+            if c.dist > 0. {
+                None
+            } else {
+                Some(Contact {
+                    penetration: -c.dist,
+                    r_a: Into::<Vec2>::into(c.point1) - pos_a,
+                    r_b: Into::<Vec2>::into(c.point2) - pos_b,
+                    normal: (*c.normal1).into(),
+                })
             }
-        } else {
-            return None;
         }
-        Some(Contact {
-            penetration: a_contact.penetration,
-            normal: rot_a.rotate(a_contact.normal),
-        })
-    } else {
-        None
+        None => None,
     }
 }
 
@@ -190,6 +203,8 @@ mod tests {
         let Contact {
             normal,
             penetration,
+            r_a: todo!(),
+            r_b: todo!(),
         } = box_box(Vec2::ZERO, Default::default(), Vec2::ONE,
                     Vec2::new(0.9, 0.), Default::default(), Vec2::ONE).unwrap();
 

@@ -42,6 +42,15 @@ pub struct DynamicBoxBundle {
 }
 
 impl DynamicBoxBundle {
+    pub fn new_with_pos_and_vel(pos: Vec2, vel: Vec2) -> Self {
+        Self {
+            pos: Pos(pos),
+            prev_pos: PrevPos(pos - vel * SUB_DT),
+            vel: Vel(vel),
+            ..Default::default()
+        }
+    }
+
     pub fn new_with_pos_and_vel_and_rot_and_ang_vel(
         pos: Vec2,
         vel: Vec2,
