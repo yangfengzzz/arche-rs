@@ -73,6 +73,11 @@ fn spawn_boxes(mut commands: Commands, materials: Res<Materials>, meshes: ResMut
     let vel = Vec2::new(random::<f32>() - 0.5, random::<f32>() - 0.5);
     let rot = random::<Rot>();
     let ang_vel = random::<f32>() * 2. - 1.;
+    let collider = BoxCollider { size };
+    let mass = Mass(1.);
+    let inertia = Inertia {
+        inv: collider.inertia_inv_from_mass_inv(1. / mass.0),
+    };
     commands
         .spawn_bundle(PbrBundle {
             mesh: meshes.quad.clone(),
@@ -86,7 +91,9 @@ fn spawn_boxes(mut commands: Commands, materials: Res<Materials>, meshes: ResMut
             ..Default::default()
         })
         .insert_bundle(DynamicBoxBundle {
-            collider: BoxCollider { size },
+            collider,
+            inertia,
+            mass,
             ..DynamicBoxBundle::new_with_pos_and_vel_and_rot_and_ang_vel(pos, vel, rot, ang_vel)
         });
 }

@@ -334,12 +334,12 @@ fn solve_pos_static_boxes(
 }
 
 fn solve_pos_box_box(
-    mut query: Query<(&mut Pos, &mut Rot, &BoxCollider, &Mass)>,
+    mut query: Query<(&mut Pos, &mut Rot, &BoxCollider, &Mass, &Inertia)>,
     mut contacts: ResMut<Contacts>,
     collision_pairs: Res<CollisionPairs>,
 ) {
     for (entity_a, entity_b) in collision_pairs.0.iter().cloned() {
-        if let Ok(((mut pos_a, mut rot_a, box_a, mass_a), (mut pos_b, mut rot_b, box_b, mass_b))) =
+        if let Ok(((mut pos_a, mut rot_a, box_a, mass_a, inertia_a), (mut pos_b, mut rot_b, box_b, mass_b, inertia_b))) =
         query.get_pair_mut(entity_a, entity_b)
         {
             if let Some(Contact {
@@ -355,8 +355,8 @@ fn solve_pos_box_box(
                 let inertia_a_inv = 12. * mass_a_inv / box_a.size.length_squared();
                 let inertia_b_inv = 12. * mass_b_inv / box_b.size.length_squared();
 
-                let w_a_rot = inertia_a_inv * r_a.perp_dot(normal).powi(2);
-                let w_b_rot = inertia_b_inv * r_b.perp_dot(normal).powi(2);
+                let w_a_rot = inertia_a.inv * r_a.perp_dot(normal).powi(2);
+                let w_b_rot = inertia_b.inv * r_b.perp_dot(normal).powi(2);
 
                 let w_a = mass_a_inv + w_a_rot;
                 let w_b = mass_b_inv + w_b_rot;
@@ -367,9 +367,9 @@ fn solve_pos_box_box(
                 pos_a.0 += pos_impulse * w_a;
                 pos_b.0 -= pos_impulse * w_b;
 
-                *rot_a = rot_a.mul(Rot::from_radians(inertia_a_inv * r_a.perp_dot(pos_impulse)));
+                *rot_a = rot_a.mul(Rot::from_radians(inertia_a.inv * r_a.perp_dot(pos_impulse)));
                 *rot_b = rot_b.mul(Rot::from_radians(
-                    inertia_b_inv * r_b.perp_dot(-pos_impulse),
+                    inertia_b.inv * r_b.perp_dot(-pos_impulse),
                 ));
 
                 contacts.0.push(BodyContact {
@@ -385,26 +385,27 @@ fn solve_pos_box_box(
 }
 
 fn solve_pos_static_box_box(
-    mut dynamics: Query<(Entity, &mut Pos, &mut Rot, &BoxCollider, &Mass)>,
+    mut dynamics: Query<(Entity, &mut Pos, &mut Rot, &BoxCollider, &Mass, &Inertia)>,
     statics: Query<(Entity, &Pos, &Rot, &BoxCollider), Without<Mass>>,
     mut contacts: ResMut<StaticContacts>,
 ) {
-    for (entity_a, mut pos_a, mut rot_a, box_a, mass_a) in dynamics.iter_mut() {
+    for (entity_a, mut pos_a, mut rot_a, box_a, mass_a, inertia_a) in dynamics.iter_mut() {
         for (entity_b, pos_b, rot_b, box_b) in statics.iter() {
             if let Some(Contact {
                             normal,
                             penetration,
-                            r_a: r,
-                            r_b: _,
+                            r_a,
+                            r_b,
                         }) = contact::box_box(pos_a.0, *rot_a, box_a.size, pos_b.0, *rot_b, box_b.size)
             {
                 let mass_inv = 1. / mass_a.0;
                 let i_inv = 12. * mass_inv / box_a.size.length_squared();
-                let w_rot = i_inv * r.perp_dot(normal).powi(2);
+                let w_rot = inertia_a.inv * r_a.perp_dot(normal).powi(2);
                 let w = mass_inv + w_rot;
                 let p = -normal * penetration / w;
                 pos_a.0 += p * mass_inv;
-                *rot_a = rot_a.mul(Rot::from_radians(i_inv * r.perp_dot(p)));
+                let delta_rot = inertia_a.inv * r_a.perp_dot(p);
+                *rot_a = rot_a.mul(Rot::from_radians(delta_rot));
                 contacts.0.push((entity_a, entity_b, normal));
             }
         }
@@ -412,7 +413,15 @@ fn solve_pos_static_box_box(
 }
 
 fn solve_vel(
-    mut query: Query<(&mut Vel, &mut AngVel, &PreSolveVel, &PreSolveAngVel, &Mass, &Restitution)>,
+    mut query: Query<(
+        &mut Vel,
+        &mut AngVel,
+        &PreSolveVel,
+        &PreSolveAngVel,
+        &Mass,
+        &Inertia,
+        &Restitution,
+    )>,
     contacts: Res<Contacts>,
 ) {
     for BodyContact {
@@ -423,8 +432,8 @@ fn solve_vel(
         normal: n,
     } in contacts.0.iter().cloned() {
         let (
-            (mut vel_a, mut ang_vel_a, pre_solve_vel_a, pre_solve_ang_vel_a, mass_a, restitution_a),
-            (mut vel_b, mut ang_vel_b, pre_solve_vel_b, pre_solve_ang_vel_b, mass_b, restitution_b),
+            (mut vel_a, mut ang_vel_a, pre_solve_vel_a, pre_solve_ang_vel_a, mass_a, inertia_a, restitution_a),
+            (mut vel_b, mut ang_vel_b, pre_solve_vel_b, pre_solve_ang_vel_b, mass_b, inertia_b, restitution_b),
         ) = query.get_pair_mut(entity_a, entity_b).unwrap();
         let pre_solve_relative_vel = pre_solve_vel_a.0 - pre_solve_vel_b.0;
         let pre_solve_normal_vel = Vec2::dot(pre_solve_relative_vel, n);
@@ -449,8 +458,8 @@ fn solve_vel(
         let pre_solve_contact_vel_a = pre_solve_vel_a.0 + pre_solve_ang_vel_a.0 * r_a.perp();
         let pre_solve_contact_vel_b = pre_solve_vel_b.0 + pre_solve_ang_vel_b.0 * r_b.perp();
         let pre_solve_relative_vel = pre_solve_contact_vel_a - pre_solve_contact_vel_b;
-        let w_rot_a = i_inv_a * r_a.perp_dot(n).powi(2);
-        let w_rot_b = i_inv_b * r_b.perp_dot(n).powi(2);
+        let w_rot_a = inertia_a.inv * r_a.perp_dot(n).powi(2);
+        let w_rot_b = inertia_b.inv * r_b.perp_dot(n).powi(2);
 
         let w_a = 1. / mass_a.0 + w_rot_a;
         let w_b = 1. / mass_b.0 + w_rot_b;
@@ -463,18 +472,34 @@ fn solve_vel(
         vel_a.0 += vel_impulse / mass_a.0;
         vel_b.0 -= vel_impulse / mass_b.0;
 
-        ang_vel_a.0 += i_inv_a * r_a.perp_dot(vel_impulse);
-        ang_vel_b.0 += i_inv_b * r_b.perp_dot(-vel_impulse);
+        ang_vel_a.0 += inertia_a.inv * r_a.perp_dot(vel_impulse);
+        ang_vel_b.0 += inertia_b.inv * r_b.perp_dot(-vel_impulse);
     }
 }
 
 fn solve_vel_statics(
-    mut dynamics: Query<(&mut Vel, &PreSolveVel, &Restitution), With<Mass>>,
+    mut dynamics: Query<(
+        &mut Vel,
+        &mut AngVel,
+        &PreSolveVel,
+        &PreSolveAngVel,
+        &Mass,
+        &Inertia,
+        &Restitution,
+    )>,
     statics: Query<&Restitution, Without<Mass>>,
     contacts: Res<StaticContacts>,
 ) {
     for (entity_a, entity_b, n) in contacts.0.iter().cloned() {
-        let (mut vel_a, pre_solve_vel_a, restitution_a) = dynamics.get_mut(entity_a).unwrap();
+        let (
+            mut vel_a,
+            mut ang_vel_a,
+            pre_solve_vel_a,
+            pre_solve_ang_vel_a,
+            mass_a,
+            inertia_a,
+            restitution_a,
+        ) = dynamics.get_mut(entity_a).unwrap();
         let restitution_b = statics.get(entity_b).unwrap();
         let pre_solve_normal_vel = Vec2::dot(pre_solve_vel_a.0, n);
         let normal_vel = Vec2::dot(vel_a.0, n);

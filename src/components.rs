@@ -35,6 +35,12 @@ pub struct BoxCollider {
     pub size: Vec2,
 }
 
+impl BoxCollider {
+    pub fn inertia_inv_from_mass_inv(&self, mass_inv: f32) -> f32 {
+        12. * mass_inv / self.size.length_squared()
+    }
+}
+
 impl Default for BoxCollider {
     fn default() -> Self {
         Self { size: Vec2::ONE }
@@ -69,4 +75,9 @@ impl Aabb {
             && self.min.x <= other.max.x
             && self.min.y <= other.max.y
     }
+}
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct Inertia {
+    pub inv: f32,
 }

@@ -33,6 +33,7 @@ pub struct DynamicBoxBundle {
     pub prev_pos: PrevPos,
     pub prev_rot: PrevRot,
     pub mass: Mass,
+    pub inertia: Inertia,
     pub collider: BoxCollider,
     pub vel: Vel,
     pub ang_vel: AngVel,
