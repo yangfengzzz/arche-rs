@@ -54,6 +54,37 @@ fn startup(
         },
         ..OrthographicCameraBundle::new_3d()
     });
+
+    let sphere = meshes.add(Mesh::from(shape::Icosphere {
+        radius: 1.,
+        subdivisions: 4,
+    }));
+
+    let blue = materials.add(StandardMaterial {
+        base_color: Color::rgb(0.4, 0.4, 0.6),
+        unlit: true,
+        ..Default::default()
+    });
+
+    let radius = 15.;
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: sphere.clone(),
+            material: blue.clone(),
+            transform: Transform {
+                scale: Vec3::splat(radius),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .insert_bundle(StaticColliderBundle {
+            pos: Pos(Vec2::new(0., -radius - 2.)),
+            collider: CircleCollider { radius },
+            ..Default::default()
+        });
+
+    commands.insert_resource(Meshes { sphere });
+    commands.insert_resource(Materials { blue });
 }
 
 fn spawn_marbles(mut commands: Commands, materials: Res<Materials>, meshes: Res<Meshes>) {

@@ -128,6 +128,28 @@ fn solve_pos(
     }
 }
 
+fn solve_pos_statics(
+    mut dynamics: Query<(Entity, &mut Pos, &CircleCollider), With<Mass>>,
+    statics: Query<(Entity, &Pos, &CircleCollider), Without<Mass>>,
+    mut contacts: ResMut<StaticContacts>,
+) {
+    contacts.0.clear();
+    for (entity_a, mut pos_a, circle_a) in dynamics.iter_mut() {
+        for (entity_b, pos_b, circle_b) in statics.iter() {
+            let ab = pos_b.0 - pos_a.0;
+            let combined_radius = circle_a.radius + circle_b.radius;
+            let ab_sqr_len = ab.length_squared();
+            if ab_sqr_len < combined_radius * combined_radius {
+                let ab_length = ab_sqr_len.sqrt();
+                let penetration_depth = combined_radius - ab_length;
+                let n = ab / ab_length;
+                pos_a.0 -= n * penetration_depth;
+                contacts.0.push((entity_a, entity_b));
+            }
+        }
+    }
+}
+
 fn solve_vel(
     query: Query<(&mut Vel, &PreSolveVel, &Pos, &Mass, &Restitution)>,
     contacts: Res<Contacts>,
@@ -161,6 +183,24 @@ fn solve_vel(
     }
 }
 
+fn solve_vel_statics(
+    mut dynamics: Query<(&mut Vel, &PreSolveVel, &Pos, &Restitution), With<Mass>>,
+    statics: Query<(&Pos, &Restitution), Without<Mass>>,
+    contacts: Res<StaticContacts>,
+) {
+    for (entity_a, entity_b) in contacts.0.iter().cloned() {
+        let (mut vel_a, pre_solve_vel_a, pos_a, restitution_a) =
+            dynamics.get_mut(entity_a).unwrap();
+        let (pos_b, restitution_b) = statics.get(entity_b).unwrap();
+        let ba = pos_a.0 - pos_b.0;
+        let n = ba.normalize();
+        let pre_solve_normal_vel = Vec2::dot(pre_solve_vel_a.0, n);
+        let normal_vel = Vec2::dot(vel_a.0, n);
+        let restitution = (restitution_a.0 + restitution_b.0) / 2.;
+        vel_a.0 += n * (-normal_vel - restitution * pre_solve_normal_vel);
+    }
+}
+
 /// Copies positions from the physics world to bevy Transforms
 fn sync_transforms(mut query: Query<(&mut Transform, &Pos)>) {
     for (mut transform, pos) in query.iter_mut() {
@@ -175,29 +215,38 @@ impl Plugin for XPBDPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Gravity>()
             .init_resource::<Contacts>()
+            .init_resource::<StaticContacts>()
             .add_stage_before(
-            CoreStage::Update,
-            FixedUpdateStage,
-            SystemStage::parallel()
-                .with_run_criteria(FixedTimestep::step(DELTA_TIME as f64))
-                .with_system(
-                    collect_collision_pairs
-                        .label(Step::CollectCollisionPairs)
-                        .before(Step::Integrate),
-                )
-                .with_system(integrate.label(Step::Integrate))
-                .with_system(solve_pos.label(Step::SolvePositions).after(Step::Integrate))
-                .with_system(
-                    solve_vel
-                        .label(Step::UpdateVelocities)
-                        .after(Step::SolvePositions),
-                )
-                .with_system(
-                    solve_vel
-                        .label(Step::SolveVelocities)
-                        .after(Step::UpdateVelocities),
-                )
-                .with_system(sync_transforms.after(Step::SolveVelocities)),
-        );
+                CoreStage::Update,
+                FixedUpdateStage,
+                SystemStage::parallel()
+                    .with_run_criteria(FixedTimestep::step(DELTA_TIME as f64))
+                    .with_system(
+                        collect_collision_pairs
+                            .label(Step::CollectCollisionPairs)
+                            .before(Step::Integrate),
+                    )
+                    .with_system(integrate.label(Step::Integrate))
+                    .with_system_set(
+                        SystemSet::new()
+                            .label(Step::SolvePositions)
+                            .after(Step::Integrate)
+                            .with_system(solve_pos)
+                            .with_system(solve_pos_statics),
+                    )
+                    .with_system(
+                        solve_vel
+                            .label(Step::UpdateVelocities)
+                            .after(Step::SolvePositions),
+                    )
+                    .with_system_set(
+                        SystemSet::new()
+                            .label(Step::SolveVelocities)
+                            .after(Step::UpdateVelocities)
+                            .with_system(solve_vel)
+                            .with_system(solve_vel_statics),
+                    )
+                    .with_system(sync_transforms.after(Step::SolveVelocities)),
+            );
     }
 }

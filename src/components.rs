@@ -35,6 +35,9 @@ pub struct PreSolveVel(pub(crate) Vec2);
 #[derive(Default, Debug)]
 pub struct Contacts(pub Vec<(Entity, Entity)>);
 
+#[derive(Default, Debug)]
+pub struct StaticContacts(pub Vec<(Entity, Entity)>);
+
 #[derive(Component, Debug)]
 pub struct Restitution(pub f32);
 
