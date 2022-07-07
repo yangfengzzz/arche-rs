@@ -1,15 +1,18 @@
 mod components;
 mod entity;
+mod resources;
 
 pub use components::*;
 pub use entity::*;
+pub use resources::*;
 
 use bevy::{core::FixedTimestep, prelude::*};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 struct FixedUpdateStage;
 
-pub const DELTA_TIME: f32 = 1. / 60.;
+pub const SUBSTEPS: i32 = 10;
+pub const DELTA_TIME: f32 = 1. / 60. / SUBSTEPS as f32;
 
 pub fn startup(
     mut commands: Commands,
@@ -73,7 +76,30 @@ enum Step {
     SolveVelocities,
 }
 
-fn collect_collision_pairs() {}
+fn collect_collision_pairs(
+    query: Query<(Entity, &Pos, &CircleCollider)>,
+    mut collision_pairs: ResMut<CollisionPairs>,
+) {
+    collision_pairs.0.clear();
+    unsafe {
+        for (entity_a, pos_a, circle_a) in query.iter_unsafe() {
+            for (entity_b, pos_b, circle_b) in query.iter_unsafe() {
+                // Ensure safety
+                if entity_a <= entity_b {
+                    continue;
+                }
+
+                let ab = pos_b.0 - pos_a.0;
+                let combined_radius = circle_a.radius + circle_b.radius;
+
+                let ab_sqr_len = ab.length_squared();
+                if ab_sqr_len < combined_radius * combined_radius {
+                    collision_pairs.0.push((entity_a, entity_b));
+                }
+            }
+        }
+    }
+}
 
 fn integrate(
     mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel, &mut PreSolveVel, &Mass)>,
@@ -96,14 +122,20 @@ fn clear_contacts(mut contacts: ResMut<Contacts>, mut static_contacts: ResMut<St
 }
 
 fn solve_pos(
-    mut query: Query<(Entity, &mut Pos, &CircleCollider, &Mass)>,
-    mut contacts: ResMut<Contacts>,
+    query: Query<(&mut Pos, &CircleCollider, &Mass)>,
+    collision_pairs: Res<CollisionPairs>,
 ) {
-    let mut iter = query.iter_combinations_mut();
-    while let Some(
-        [(entity_a, mut pos_a, circle_a, mass_a), (entity_b, mut pos_b, circle_b, mass_b)],
-    ) = iter.fetch_next()
-    {
+    for (entity_a, entity_b) in collision_pairs.0.iter() {
+        let (
+            (mut pos_a, circle_a, mass_a),
+            (mut pos_b, circle_b, mass_b),
+        ) = unsafe {
+            assert_ne!(entity_a, entity_b); // Ensure we don't violate memory constraints
+            (
+                query.get_unchecked(*entity_a).unwrap(),
+                query.get_unchecked(*entity_b).unwrap(),
+            )
+        };
         let ab = pos_b.0 - pos_a.0;
         let combined_radius = circle_a.radius + circle_b.radius;
         let ab_sqr_len = ab.length_squared();
@@ -111,7 +143,6 @@ fn solve_pos(
             let ab_length = ab_sqr_len.sqrt();
             let penetration_depth = combined_radius - ab_length;
             let n = ab / ab_length;
-            contacts.0.push((entity_a, entity_b, n));
 
             let w_a = 1. / mass_a.0;
             let w_b = 1. / mass_b.0;
@@ -248,6 +279,7 @@ pub struct XPBDPlugin;
 impl Plugin for XPBDPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Gravity>()
+            .init_resource::<CollisionPairs>()
             .init_resource::<Contacts>()
             .init_resource::<StaticContacts>()
             .add_stage_before(
