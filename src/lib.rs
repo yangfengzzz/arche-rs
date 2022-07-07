@@ -126,12 +126,12 @@ impl LoopState {
     }
 }
 
-pub fn pause(mut xpbd_loop: ResMut<LoopState>) {
-    xpbd_loop.pause();
+pub fn pause(mut loop_state: ResMut<LoopState>) {
+    loop_state.pause();
 }
 
-pub fn resume(mut xpbd_loop: ResMut<LoopState>) {
-    xpbd_loop.resume();
+pub fn resume(mut loop_state: ResMut<LoopState>) {
+    loop_state.resume();
 }
 
 fn run_criteria(time: Res<Time>, mut state: ResMut<LoopState>) -> ShouldRun {
@@ -194,9 +194,22 @@ fn integrate(
     }
 }
 
+fn integrate_rot(mut query: Query<(&mut Rot, &mut PrevRot)>) {
+    for (mut rot, mut prev_rot) in query.iter_mut() {
+        prev_rot.0 = *rot;
+        rot += SUB_DT * ang_vel.0;
+    }
+}
+
 fn update_vel(mut query: Query<(&Pos, &PrevPos, &mut Vel)>) {
     for (pos, prev_pos, mut vel) in query.iter_mut() {
         vel.0 = (pos.0 - prev_pos.0) / SUB_DT;
+    }
+}
+
+fn update_ang_vel(mut query: Query<(&Rot, &PrevRot, &mut AngVel)>) {
+    for (rot, prev_rot, mut ang_vel) in query.iter_mut() {
+        ang_vel.0 = (prev_rot.0.inv().mul(*rot)).as_radians() / SUB_DT;
     }
 }
 
@@ -208,9 +221,16 @@ fn update_aabb_circle(mut query: Query<(&mut Aabb, &Pos, &CircleCollider)>) {
     }
 }
 
-fn update_aabb_box(mut query: Query<(&mut Aabb, &Pos, &BoxCollider)>) {
-    for (mut aabb, pos, r#box) in query.iter_mut() {
-        let half_extents = r#box.size / 2.;
+fn update_aabb_box(mut query: Query<(&mut Aabb, &Pos, &Rot, &Vel, &BoxCollider)>) {
+    for (mut aabb, pos, rot, vel, r#box) in query.iter_mut() {
+        let sin = rot.sin().abs();
+        let cos = rot.cos().abs();
+        let box_w = r#box.size.x;
+        let box_h = r#box.size.y;
+        let w = box_h * sin + box_w * cos;
+        let h = box_w * sin + box_h * cos;
+        let margin = COLLISION_PAIR_VEL_MARGIN_FACTOR * vel.0.length();
+        let half_extents = Vec2::new(w / 2., h / 2.) + Vec2::splat(margin);
         aabb.min = pos.0 - half_extents;
         aabb.max = pos.0 + half_extents;
     }
@@ -300,18 +320,19 @@ fn solve_pos_static_boxes(
 }
 
 fn solve_pos_box_box(
-    mut query: Query<(&mut Pos, &BoxCollider, &Mass)>,
+    mut query: Query<(&mut Pos, &Rot, &BoxCollider, &Mass)>,
     mut contacts: ResMut<Contacts>,
     collision_pairs: Res<CollisionPairs>,
 ) {
     for (entity_a, entity_b) in collision_pairs.0.iter().cloned() {
-        if let Ok(((mut pos_a, box_a, mass_a), (mut pos_b, box_b, mass_b))) =
+        if let Ok(((mut pos_a, rot_a, box_a, mass_a), (mut pos_b, rot_b, box_b, mass_b))) =
         query.get_pair_mut(entity_a, entity_b)
         {
             if let Some(Contact {
                             normal,
                             penetration,
-                        }) = contact::box_box(pos_a.0, box_a.size, pos_b.0, box_b.size)
+                        }) = contact::box_box(pos_a.0, *rot_a, box_a.size,
+                                              pos_b.0, *rot_b, box_b.size)
             {
                 constrain_body_positions(
                     &mut pos_a,
@@ -328,16 +349,16 @@ fn solve_pos_box_box(
 }
 
 fn solve_pos_static_box_box(
-    mut dynamics: Query<(Entity, &mut Pos, &BoxCollider), With<Mass>>,
-    statics: Query<(Entity, &Pos, &BoxCollider), Without<Mass>>,
+    mut dynamics: Query<(Entity, &mut Pos, &Rot, &BoxCollider), With<Mass>>,
+    statics: Query<(Entity, &Pos, &Rot, &BoxCollider), Without<Mass>>,
     mut contacts: ResMut<StaticContacts>,
 ) {
-    for (entity_a, mut pos_a, box_a) in dynamics.iter_mut() {
-        for (entity_b, pos_b, box_b) in statics.iter() {
+    for (entity_a, mut pos_a, rot_a, box_a) in dynamics.iter_mut() {
+        for (entity_b, pos_b, rot_b, box_b) in statics.iter() {
             if let Some(Contact {
                             normal,
                             penetration,
-                        }) = contact::box_box(pos_a.0, box_a.size, pos_b.0, box_b.size)
+                        }) = contact::box_box(pos_a.0, *rot_a, box_a.size, pos_b.0, *rot_b, box_b.size)
             {
                 constrain_body_position(&mut pos_a, normal, penetration);
                 contacts.0.push((entity_a, entity_b, normal));
@@ -389,10 +410,11 @@ fn solve_vel_statics(
     }
 }
 
-/// Copies positions from the physics world to bevy Transforms
-fn sync_transforms(mut query: Query<(&mut Transform, &Pos)>) {
-    for (mut transform, pos) in query.iter_mut() {
+/// Copies positions and rotations from the physics world to bevy Transforms
+fn sync_transforms(mut query: Query<(&mut Transform, &Pos, &Rot)>) {
+    for (mut transform, pos, rot) in query.iter_mut() {
         transform.translation = pos.0.extend(0.);
+        transform.rotation = (*rot).into();
     }
 }
 
@@ -423,7 +445,12 @@ impl Plugin for XPBDPlugin {
                             .label(Step::CollectCollisionPairs)
                             .before(Step::Integrate),
                     )
-                    .with_system(integrate.label(Step::Integrate))
+                    .with_system_set(
+                        SystemSet::new()
+                            .label(Step::Integrate)
+                            .with_system(integrate)
+                            .with_system(integrate_rot),
+                    )
                     .with_system_set(
                         SystemSet::new()
                             .label(Step::SolvePositions)
@@ -434,10 +461,12 @@ impl Plugin for XPBDPlugin {
                             .with_system(solve_pos_static_boxes)
                             .with_system(solve_pos_static_box_box),
                     )
-                    .with_system(
-                        update_vel
+                    .with_system_set(
+                        SystemSet::new()
                             .label(Step::UpdateVelocities)
-                            .after(Step::SolvePositions),
+                            .after(Step::SolvePositions)
+                            .with_system(update_vel)
+                            .with_system(update_ang_vel)
                     )
                     .with_system_set(
                         SystemSet::new()

@@ -49,6 +49,7 @@ fn startup(
         })
         .insert_bundle(StaticBoxBundle {
             pos: Pos(Vec2::new(0., -3.)),
+            rot: Rot::from_degrees(0.),
             collider: BoxCollider { size },
             ..Default::default()
         });
@@ -70,6 +71,8 @@ fn spawn_boxes(mut commands: Commands, materials: Res<Materials>, meshes: ResMut
     let size = Vec2::splat(0.3);
     let pos = Vec2::new(random::<f32>() - 0.5, random::<f32>() - 0.5) * 0.5 + Vec2::Y * 3.;
     let vel = Vec2::new(random::<f32>() - 0.5, random::<f32>() - 0.5);
+    let rot = random::<Rot>();
+    let ang_vel = random::<f32>() * 2. - 1.;
     commands
         .spawn_bundle(PbrBundle {
             mesh: meshes.quad.clone(),
@@ -77,13 +80,14 @@ fn spawn_boxes(mut commands: Commands, materials: Res<Materials>, meshes: ResMut
             transform: Transform {
                 scale: size.extend(1.),
                 translation: pos.extend(0.),
+                rotation: rot.into(),
                 ..Default::default()
             },
             ..Default::default()
         })
         .insert_bundle(DynamicBoxBundle {
             collider: BoxCollider { size },
-            ..DynamicBoxBundle::new_with_pos_and_vel(pos, vel)
+            ..DynamicBoxBundle::new_with_pos_and_vel_and_rot_and_ang_vel(pos, vel, rot, ang_vel)
         });
 }
 

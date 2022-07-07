@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use crate::Rot;
 
 pub struct Contact {
     pub penetration: f32,
@@ -57,25 +58,104 @@ pub fn ball_box(pos_a: Vec2, radius_a: f32, pos_b: Vec2, size_b: Vec2) -> Option
     })
 }
 
-pub fn box_box(pos_a: Vec2, size_a: Vec2, pos_b: Vec2, size_b: Vec2) -> Option<Contact> {
+fn local_box_box(half_a: Vec2, ab: Vec2, rot_b: Rot, half_b: Vec2) -> Option<Contact> {
+    let v1 = rot_b.rotate(Vec2::new(half_b.x, half_b.y));
+    let v2 = rot_b.rotate(Vec2::new(half_b.x, -half_b.y));
+    let v3 = -v1;
+    let v4 = -v2;
+
+    let v1 = v1 + ab;
+    let v2 = v2 + ab;
+    let v3 = v3 + ab;
+    let v4 = v4 + ab;
+
+    let mut min_penetration = f32::MAX;
+    let mut n = Vec2::ZERO;
+    let v_max = v1.max(v2).max(v3.max(v4));
+    let v_min = v1.min(v2).min(v3.min(v4));
+
+    // right edge
+    {
+        let penetration = half_a.x - v_min.x;
+        if penetration < 0. {
+            return None;
+        } else if penetration < min_penetration {
+            min_penetration = penetration;
+            n = Vec2::X;
+        }
+    }
+
+    // left edge
+    {
+        let penetration = half_a.x + v_max.x;
+        if penetration < 0. {
+            return None;
+        } else if penetration < min_penetration {
+            min_penetration = penetration;
+            n = -Vec2::X;
+        }
+    }
+
+    // top edge
+    {
+        let penetration = half_a.y - v_min.y;
+        if penetration < 0. {
+            return None;
+        } else if penetration < min_penetration {
+            min_penetration = penetration;
+            n = Vec2::Y;
+        }
+    }
+
+    // bottom edge
+    {
+        let penetration = half_a.y + v_max.y;
+        if penetration < 0. {
+            return None;
+        } else if penetration < min_penetration {
+            min_penetration = penetration;
+            n = -Vec2::Y;
+        }
+    }
+
+    Some(Contact {
+        penetration: min_penetration,
+        normal: n,
+    })
+}
+
+pub fn box_box(
+    pos_a: Vec2,
+    rot_a: Rot,
+    size_a: Vec2,
+    pos_b: Vec2,
+    rot_b: Rot,
+    size_b: Vec2,
+) -> Option<Contact> {
     let half_a = size_a / 2.;
     let half_b = size_b / 2.;
     let ab = pos_b - pos_a;
-    let overlap = (half_a + half_b) - ab.abs(); // exploit symmetry
-    if overlap.x < 0. || overlap.y < 0. {
-        None
-    } else if overlap.x < overlap.y {
-        // closer to vertical edge
+    let rot_ab = rot_a.inv().mul(rot_b);
+    if let Some(a_contact) = local_box_box(half_a, rot_a.inv().rotate(ab), rot_ab, half_b) {
+        // Check if there is a better separating axis along the other box' normals.
+        if let Some(b_contact) =
+        local_box_box(half_b, rot_b.inv().rotate(-ab), rot_ab.inv(), half_a)
+        {
+            if b_contact.penetration < a_contact.penetration {
+                return Some(Contact {
+                    penetration: b_contact.penetration,
+                    normal: rot_b.rotate(-b_contact.normal),
+                });
+            }
+        } else {
+            return None;
+        }
         Some(Contact {
-            penetration: overlap.x,
-            normal: Vec2::X * ab.x.signum(),
+            penetration: a_contact.penetration,
+            normal: rot_a.rotate(a_contact.normal),
         })
     } else {
-        // closer to horizontal edge
-        Some(Contact {
-            penetration: overlap.y,
-            normal: Vec2::Y * ab.y.signum(),
-        })
+        None
     }
 }
 
@@ -85,17 +165,24 @@ mod tests {
 
     #[test]
     fn box_box_clear() {
-        assert!(box_box(Vec2::ZERO, Vec2::ONE, Vec2::new(1.1, 0.), Vec2::ONE).is_none());
-        assert!(box_box(Vec2::ZERO, Vec2::ONE, Vec2::new(-1.1, 0.), Vec2::ONE).is_none());
-        assert!(box_box(Vec2::ZERO, Vec2::ONE, Vec2::new(0., 1.1), Vec2::ONE).is_none());
-        assert!(box_box(Vec2::ZERO, Vec2::ONE, Vec2::new(0., -1.1), Vec2::ONE).is_none());
+        assert!(box_box(Vec2::ZERO, Default::default(), Vec2::ONE,
+                        Vec2::new(1.1, 0.), Default::default(), Vec2::ONE).is_none());
+        assert!(box_box(Vec2::ZERO, Default::default(), Vec2::ONE,
+                        Vec2::new(-1.1, 0.), Default::default(), Vec2::ONE).is_none());
+        assert!(box_box(Vec2::ZERO, Default::default(), Vec2::ONE,
+                        Vec2::new(0., 1.1), Default::default(), Vec2::ONE).is_none());
+        assert!(box_box(Vec2::ZERO, Default::default(), Vec2::ONE,
+                        Vec2::new(0., -1.1), Default::default(), Vec2::ONE).is_none());
     }
 
     #[test]
     fn box_box_intersection() {
-        assert!(box_box(Vec2::ZERO, Vec2::ONE, Vec2::ZERO, Vec2::ONE).is_some());
-        assert!(box_box(Vec2::ZERO, Vec2::ONE, Vec2::new(0.9, 0.9), Vec2::ONE).is_some());
-        assert!(box_box(Vec2::ZERO, Vec2::ONE, Vec2::new(-0.9, -0.9), Vec2::ONE).is_some());
+        assert!(box_box(Vec2::ZERO, Default::default(), Vec2::ONE,
+                        Vec2::ZERO, Default::default(), Vec2::ONE).is_some());
+        assert!(box_box(Vec2::ZERO, Default::default(), Vec2::ONE,
+                        Vec2::new(0.9, 0.9), Default::default(), Vec2::ONE).is_some());
+        assert!(box_box(Vec2::ZERO, Default::default(), Vec2::ONE,
+                        Vec2::new(-0.9, -0.9), Default::default(), Vec2::ONE).is_some());
     }
 
     #[test]
@@ -103,7 +190,8 @@ mod tests {
         let Contact {
             normal,
             penetration,
-        } = box_box(Vec2::ZERO, Vec2::ONE, Vec2::new(0.9, 0.), Vec2::ONE).unwrap();
+        } = box_box(Vec2::ZERO, Default::default(), Vec2::ONE,
+                    Vec2::new(0.9, 0.), Default::default(), Vec2::ONE).unwrap();
 
         assert!(normal.x > 0.);
         assert!(normal.y < 0.001);

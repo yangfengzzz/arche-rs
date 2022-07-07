@@ -1,4 +1,7 @@
+use std::f32::consts::PI;
 use bevy::prelude::*;
+use rand::distributions::Standard;
+use rand::prelude::Distribution;
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Rot {
@@ -51,4 +54,43 @@ impl Rot {
             sin: self.sin * rhs.cos + self.cos * rhs.sin,
         }
     }
+
+    pub fn sin(self) -> f32 {
+        self.sin
+    }
+
+    pub fn cos(self) -> f32 {
+        self.cos
+    }
 }
+
+impl From<Rot> for Quat {
+    fn from(rot: Rot) -> Self {
+        if rot.cos < 0. {
+            let t = 1. - rot.cos;
+            let d = 1. / (t * 2.).sqrt();
+            let z = t * d;
+            let w = -rot.sin * d;
+            Quat::from_xyzw(0., 0., z, w)
+        } else {
+            let t = 1. + rot.cos;
+            let d = 1. / (t * 2.).sqrt();
+            let z = -rot.sin * d;
+            let w = t * d;
+            Quat::from_xyzw(0., 0., z, w)
+        }
+    }
+}
+
+impl Distribution<Rot> for Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Rot {
+        let radians = rng.gen_range::<f32, _>(-PI..PI);
+        Rot::from_radians(radians)
+    }
+}
+
+#[derive(Component, Debug, Default)]
+pub struct PrevRot(pub Rot);
+
+#[derive(Component, Debug, Default)]
+pub struct AngVel(pub(crate) f32);

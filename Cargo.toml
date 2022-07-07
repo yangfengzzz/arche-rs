@@ -9,3 +9,6 @@ debug = true
 [dependencies]
 bevy = "0.6"
 rand = "0.8"
+
+[dev-dependencies]
+approx = "0.5"
