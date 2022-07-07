@@ -1,10 +1,14 @@
 mod components;
 mod entity;
 mod resources;
+mod contact;
+mod utils;
 
 pub use components::*;
 pub use entity::*;
 pub use resources::*;
+use utils::*;
+use contact::Contact;
 
 use bevy::{prelude::*, ecs::schedule::*};
 
@@ -207,35 +211,43 @@ fn update_vel(mut query: Query<(&Pos, &PrevPos, &mut Vel)>) {
     }
 }
 
+/// Solves overlap between two dynamic bodies according to their masses
+fn constrain_body_positions(
+    pos_a: &mut Pos,
+    pos_b: &mut Pos,
+    mass_a: &Mass,
+    mass_b: &Mass,
+    n: Vec2,
+    penetration_depth: f32,
+) {
+    let w_a = 1. / mass_a.0;
+    let w_b = 1. / mass_b.0;
+    let w_sum = w_a + w_b;
+    let pos_impulse = n * (-penetration_depth / w_sum);
+    pos_a.0 += pos_impulse * w_a;
+    pos_b.0 -= pos_impulse * w_b;
+}
+
+/// Solve a overlap between a dynamic object and a static object
+fn constrain_body_position(pos: &mut Pos, normal: Vec2, penetration_depth: f32) {
+    pos.0 -= normal * penetration_depth;
+}
+
 fn solve_pos(
-    query: Query<(&mut Pos, &CircleCollider, &Mass)>,
+    mut query: Query<(&mut Pos, &CircleCollider, &Mass)>,
+    mut contacts: ResMut<Contacts>,
     collision_pairs: Res<CollisionPairs>,
 ) {
-    for (entity_a, entity_b) in collision_pairs.0.iter() {
-        let (
-            (mut pos_a, circle_a, mass_a),
-            (mut pos_b, circle_b, mass_b),
-        ) = unsafe {
-            assert_ne!(entity_a, entity_b); // Ensure we don't violate memory constraints
-            (
-                query.get_unchecked(*entity_a).unwrap(),
-                query.get_unchecked(*entity_b).unwrap(),
-            )
-        };
-        let ab = pos_b.0 - pos_a.0;
-        let combined_radius = circle_a.radius + circle_b.radius;
-        let ab_sqr_len = ab.length_squared();
-        if ab_sqr_len < combined_radius * combined_radius {
-            let ab_length = ab_sqr_len.sqrt();
-            let penetration_depth = combined_radius - ab_length;
-            let n = ab / ab_length;
-
-            let w_a = 1. / mass_a.0;
-            let w_b = 1. / mass_b.0;
-            let w_sum = w_a + w_b;
-
-            pos_a.0 -= n * penetration_depth * w_a / w_sum;
-            pos_b.0 += n * penetration_depth * w_b / w_sum;
+    for (entity_a, entity_b) in collision_pairs.0.iter().cloned() {
+        let ((mut pos_a, circle_a, mass_a), (mut pos_b, circle_b, mass_b)) =
+            query.get_pair_mut(entity_a, entity_b).unwrap();
+        if let Some(Contact {
+                        normal,
+                        penetration,
+                    }) = contact::ball_ball(pos_a.0, circle_a.radius, pos_b.0, circle_b.radius)
+        {
+            constrain_body_positions(&mut pos_a, &mut pos_b, mass_a, mass_b, normal, penetration);
+            contacts.0.push((entity_a, entity_b, normal));
         }
     }
 }
@@ -247,15 +259,13 @@ fn solve_pos_statics(
 ) {
     for (entity_a, mut pos_a, circle_a) in dynamics.iter_mut() {
         for (entity_b, pos_b, circle_b) in statics.iter() {
-            let ab = pos_b.0 - pos_a.0;
-            let combined_radius = circle_a.radius + circle_b.radius;
-            let ab_sqr_len = ab.length_squared();
-            if ab_sqr_len < combined_radius * combined_radius {
-                let ab_length = ab_sqr_len.sqrt();
-                let penetration_depth = combined_radius - ab_length;
-                let n = ab / ab_length;
-                pos_a.0 -= n * penetration_depth;
-                contacts.0.push((entity_a, entity_b, n));
+            if let Some(Contact {
+                            normal,
+                            penetration,
+                        }) = contact::ball_ball(pos_a.0, circle_a.radius, pos_b.0, circle_b.radius)
+            {
+                constrain_body_position(&mut pos_a, normal, penetration);
+                contacts.0.push((entity_a, entity_b, normal));
             }
         }
     }
@@ -268,56 +278,27 @@ fn solve_pos_static_boxes(
 ) {
     for (entity_a, mut pos_a, circle_a) in dynamics.iter_mut() {
         for (entity_b, pos_b, box_b) in statics.iter() {
-            let box_to_circle = pos_a.0 - pos_b.0;
-            let box_to_circle_abs = box_to_circle.abs();
-            let half_extents = box_b.size / 2.;
-            let corner_to_center = box_to_circle_abs - half_extents;
-            let r = circle_a.radius;
-            if corner_to_center.x > r || corner_to_center.y > r {
-                continue;
+            if let Some(Contact {
+                            normal,
+                            penetration,
+                        }) = contact::ball_box(pos_a.0, circle_a.radius, pos_b.0, box_b.size)
+            {
+                constrain_body_position(&mut pos_a, normal, penetration);
+                contacts.0.push((entity_a, entity_b, normal));
             }
-
-            let s = box_to_circle.signum();
-
-            let (n, penetration_depth) = if corner_to_center.x > 0. && corner_to_center.y > 0. {
-                // Corner case
-                let corner_to_center_sqr = corner_to_center.length_squared();
-                if corner_to_center_sqr > r * r {
-                    continue;
-                }
-                let corner_dist = corner_to_center_sqr.sqrt();
-                let penetration_depth = r - corner_dist;
-                let n = corner_to_center / corner_dist * -s;
-                (n, penetration_depth)
-            } else if corner_to_center.x > corner_to_center.y {
-                // Closer to vertical edge
-                (Vec2::X * -s.x, -corner_to_center.x + r)
-            } else {
-                (Vec2::Y * -s.y, -corner_to_center.y + r)
-            };
-
-            pos_a.0 -= n * penetration_depth;
-            contacts.0.push((entity_a, entity_b, n));
         }
     }
 }
 
 fn solve_vel(
-    query: Query<(&mut Vel, &PreSolveVel, &Mass, &Restitution)>,
+    mut query: Query<(&mut Vel, &PreSolveVel, &Mass, &Restitution)>,
     contacts: Res<Contacts>,
 ) {
     for (entity_a, entity_b, n) in contacts.0.iter().cloned() {
         let (
             (mut vel_a, pre_solve_vel_a, mass_a, restitution_a),
             (mut vel_b, pre_solve_vel_b, mass_b, restitution_b),
-        ) = unsafe {
-            // Ensure safety
-            assert_ne!(entity_a, entity_b);
-            (
-                query.get_unchecked(entity_a).unwrap(),
-                query.get_unchecked(entity_b).unwrap(),
-            )
-        };
+        ) = query.get_pair_mut(entity_a, entity_b).unwrap();
         let pre_solve_relative_vel = pre_solve_vel_a.0 - pre_solve_vel_b.0;
         let pre_solve_normal_vel = Vec2::dot(pre_solve_relative_vel, n);
 
