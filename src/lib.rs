@@ -6,13 +6,14 @@ pub use components::*;
 pub use entity::*;
 pub use resources::*;
 
-use bevy::{core::FixedTimestep, prelude::*};
+use bevy::{prelude::*, ecs::schedule::*};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 struct FixedUpdateStage;
 
-pub const SUBSTEPS: i32 = 10;
-pub const DELTA_TIME: f32 = 1. / 60. / SUBSTEPS as f32;
+pub const DELTA_TIME: f32 = 1. / 60.;
+pub const NUM_SUBSTEPS: u32 = 10;
+pub const SUB_DT: f32 = DELTA_TIME / NUM_SUBSTEPS as f32;
 
 pub fn startup(
     mut commands: Commands,
@@ -77,20 +78,29 @@ enum Step {
 }
 
 fn collect_collision_pairs(
-    query: Query<(Entity, &Pos, &CircleCollider)>,
+    query: Query<(Entity, &Pos, &Vel, &CircleCollider)>,
     mut collision_pairs: ResMut<CollisionPairs>,
 ) {
     collision_pairs.0.clear();
+
+    let k = 2.; // safety margin multiplier bigger than 1 to account for sudden accelerations
+    let safety_margin_factor = k * DELTA_TIME;
+    let safety_margin_factor_sqr = safety_margin_factor * safety_margin_factor;
+
     unsafe {
-        for (entity_a, pos_a, circle_a) in query.iter_unsafe() {
-            for (entity_b, pos_b, circle_b) in query.iter_unsafe() {
+        for (entity_a, pos_a, vel_a, circle_a) in query.iter_unsafe() {
+            let vel_a_sqr = vel_a.0.length_squared();
+            for (entity_b, pos_b, vel_b, circle_b) in query.iter_unsafe() {
                 // Ensure safety
                 if entity_a <= entity_b {
                     continue;
                 }
 
                 let ab = pos_b.0 - pos_a.0;
-                let combined_radius = circle_a.radius + circle_b.radius;
+                let vel_b_sqr = vel_b.0.length_squared();
+                let safety_margin_sqr = safety_margin_factor_sqr * (vel_a_sqr + vel_b_sqr);
+
+                let combined_radius = circle_a.radius + circle_b.radius + safety_margin_sqr.sqrt();
 
                 let ab_sqr_len = ab.length_squared();
                 if ab_sqr_len < combined_radius * combined_radius {
@@ -98,6 +108,81 @@ fn collect_collision_pairs(
                 }
             }
         }
+    }
+}
+
+#[derive(Default)]
+pub struct LoopState {
+    pub(crate) has_added_time: bool,
+    pub(crate) accumulator: f32,
+    pub(crate) substepping: bool,
+    pub(crate) current_substep: u32,
+    pub(crate) queued_steps: u32,
+    pub paused: bool,
+}
+
+impl LoopState {
+    pub fn step(&mut self) {
+        self.queued_steps += 1;
+    }
+    pub fn pause(&mut self) {
+        self.paused = true;
+    }
+    pub fn resume(&mut self) {
+        self.paused = false;
+    }
+}
+
+pub fn pause(mut xpbd_loop: ResMut<LoopState>) {
+    xpbd_loop.pause();
+}
+
+pub fn resume(mut xpbd_loop: ResMut<LoopState>) {
+    xpbd_loop.resume();
+}
+
+fn run_criteria(time: Res<Time>, mut state: ResMut<LoopState>) -> ShouldRun {
+    if !state.has_added_time {
+        state.has_added_time = true;
+        state.accumulator += time.delta_seconds();
+    }
+
+    if state.substepping {
+        state.current_substep += 1;
+
+        if state.current_substep < NUM_SUBSTEPS {
+            return ShouldRun::YesAndCheckAgain;
+        } else {
+            // We finished a whole step
+            state.accumulator -= DELTA_TIME;
+            state.current_substep = 0;
+            state.substepping = false;
+        }
+    }
+
+    if state.accumulator >= DELTA_TIME {
+        state.substepping = true;
+        state.current_substep = 0;
+        ShouldRun::YesAndCheckAgain
+    } else {
+        state.has_added_time = false;
+        ShouldRun::No
+    }
+}
+
+fn first_substep(state: Res<LoopState>) -> ShouldRun {
+    if state.current_substep == 0 {
+        ShouldRun::Yes
+    } else {
+        ShouldRun::No
+    }
+}
+
+fn last_substep(state: Res<LoopState>) -> ShouldRun {
+    if state.current_substep == NUM_SUBSTEPS - 1 {
+        ShouldRun::Yes
+    } else {
+        ShouldRun::No
     }
 }
 
@@ -110,15 +195,16 @@ fn integrate(
 
         let gravitation_force = mass.0 * gravity.0;
         let external_forces = gravitation_force;
-        vel.0 += DELTA_TIME * external_forces / mass.0;
-        pos.0 += DELTA_TIME * vel.0;
-        pre_solve_vel.0 = vel.0; // <-- new
+        vel.0 += SUB_DT * external_forces / mass.0;
+        pos.0 += SUB_DT * vel.0;
+        pre_solve_vel.0 = vel.0;
     }
 }
 
-fn clear_contacts(mut contacts: ResMut<Contacts>, mut static_contacts: ResMut<StaticContacts>) {
-    contacts.0.clear();
-    static_contacts.0.clear();
+fn update_vel(mut query: Query<(&Pos, &PrevPos, &mut Vel)>) {
+    for (pos, prev_pos, mut vel) in query.iter_mut() {
+        vel.0 = (pos.0 - prev_pos.0) / SUB_DT;
+    }
 }
 
 fn solve_pos(
@@ -282,18 +368,19 @@ impl Plugin for XPBDPlugin {
             .init_resource::<CollisionPairs>()
             .init_resource::<Contacts>()
             .init_resource::<StaticContacts>()
+            .init_resource::<LoopState>()
             .add_stage_before(
                 CoreStage::Update,
                 FixedUpdateStage,
                 SystemStage::parallel()
-                    .with_run_criteria(FixedTimestep::step(DELTA_TIME as f64))
+                    .with_run_criteria(run_criteria)
                     .with_system(
                         collect_collision_pairs
+                            .with_run_criteria(first_substep)
                             .label(Step::CollectCollisionPairs)
                             .before(Step::Integrate),
                     )
                     .with_system(integrate.label(Step::Integrate))
-                    .with_system(clear_contacts.before(Step::SolvePositions))
                     .with_system_set(
                         SystemSet::new()
                             .label(Step::SolvePositions)
@@ -303,7 +390,7 @@ impl Plugin for XPBDPlugin {
                             .with_system(solve_pos_static_boxes),
                     )
                     .with_system(
-                        solve_vel
+                        update_vel
                             .label(Step::UpdateVelocities)
                             .after(Step::SolvePositions),
                     )
@@ -312,9 +399,13 @@ impl Plugin for XPBDPlugin {
                             .label(Step::SolveVelocities)
                             .after(Step::UpdateVelocities)
                             .with_system(solve_vel)
-                            .with_system(solve_vel_statics),
+                            .with_system(solve_vel_statics)
                     )
-                    .with_system(sync_transforms.after(Step::SolveVelocities)),
+                    .with_system(
+                        sync_transforms
+                            .with_run_criteria(last_substep)
+                            .after(Step::SolveVelocities),
+                    ),
             );
     }
 }
