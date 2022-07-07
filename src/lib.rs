@@ -195,10 +195,11 @@ fn integrate(
     }
 }
 
-fn integrate_rot(mut query: Query<(&mut Rot, &AngVel, &mut PrevRot)>) {
-    for (mut rot, ang_vel, mut prev_rot) in query.iter_mut() {
+fn integrate_rot(mut query: Query<(&mut Rot, &mut PrevRot, &AngVel, &mut PreSolveAngVel)>) {
+    for (mut rot, mut prev_rot, ang_vel, mut pre_solve_ang_vel) in query.iter_mut() {
         prev_rot.0 = *rot;
-        *rot += Rot::from_radians(SUB_DT * ang_vel.0);
+        *rot = rot.mul(Rot::from_radians(SUB_DT * ang_vel.0));
+        pre_solve_ang_vel.0 = ang_vel.0;
     }
 }
 
@@ -273,12 +274,18 @@ fn solve_pos(
             if let Some(Contact {
                             normal,
                             penetration,
-                            r_a: _,
-                            r_b: _,
+                            r_a,
+                            r_b,
                         }) = contact::ball_ball(pos_a.0, circle_a.radius, pos_b.0, circle_b.radius)
             {
                 constrain_body_positions(&mut pos_a, &mut pos_b, mass_a, mass_b, normal, penetration);
-                contacts.0.push((entity_a, entity_b, normal));
+                contacts.0.push(BodyContact {
+                    entity_a,
+                    entity_b,
+                    r_a,
+                    r_b,
+                    normal,
+                });
             }
         }
     }
@@ -365,7 +372,13 @@ fn solve_pos_box_box(
                     inertia_b_inv * r_b.perp_dot(-pos_impulse),
                 ));
 
-                contacts.0.push((entity_a, entity_b, normal));
+                contacts.0.push(BodyContact {
+                    entity_a,
+                    entity_b,
+                    r_a,
+                    r_b,
+                    normal,
+                });
             }
         }
     }
@@ -399,13 +412,19 @@ fn solve_pos_static_box_box(
 }
 
 fn solve_vel(
-    mut query: Query<(&mut Vel, &PreSolveVel, &Mass, &Restitution)>,
+    mut query: Query<(&mut Vel, &mut AngVel, &PreSolveVel, &PreSolveAngVel, &Mass, &Restitution)>,
     contacts: Res<Contacts>,
 ) {
-    for (entity_a, entity_b, n) in contacts.0.iter().cloned() {
+    for BodyContact {
+        entity_a,
+        entity_b,
+        r_a,
+        r_b,
+        normal: n,
+    } in contacts.0.iter().cloned() {
         let (
-            (mut vel_a, pre_solve_vel_a, mass_a, restitution_a),
-            (mut vel_b, pre_solve_vel_b, mass_b, restitution_b),
+            (mut vel_a, mut ang_vel_a, pre_solve_vel_a, pre_solve_ang_vel_a, mass_a, restitution_a),
+            (mut vel_b, mut ang_vel_b, pre_solve_vel_b, pre_solve_ang_vel_b, mass_b, restitution_b),
         ) = query.get_pair_mut(entity_a, entity_b).unwrap();
         let pre_solve_relative_vel = pre_solve_vel_a.0 - pre_solve_vel_b.0;
         let pre_solve_normal_vel = Vec2::dot(pre_solve_relative_vel, n);
@@ -421,8 +440,31 @@ fn solve_vel(
         let restitution_velocity = (-restitution * pre_solve_normal_vel).min(0.);
         let vel_impulse = n * ((-normal_vel + restitution_velocity) / w_sum);
 
-        vel_a.0 += vel_impulse * w_a;
-        vel_b.0 -= vel_impulse * w_b;
+        let i_inv_a = 67.;
+        let i_inv_b = 67.;
+        // angle
+        let contact_vel_a = vel_a.0 + ang_vel_a.0 * r_a.perp();
+        let contact_vel_b = vel_b.0 + ang_vel_b.0 * r_b.perp();
+        let relative_vel = contact_vel_a - contact_vel_b;
+        let pre_solve_contact_vel_a = pre_solve_vel_a.0 + pre_solve_ang_vel_a.0 * r_a.perp();
+        let pre_solve_contact_vel_b = pre_solve_vel_b.0 + pre_solve_ang_vel_b.0 * r_b.perp();
+        let pre_solve_relative_vel = pre_solve_contact_vel_a - pre_solve_contact_vel_b;
+        let w_rot_a = i_inv_a * r_a.perp_dot(n).powi(2);
+        let w_rot_b = i_inv_b * r_b.perp_dot(n).powi(2);
+
+        let w_a = 1. / mass_a.0 + w_rot_a;
+        let w_b = 1. / mass_b.0 + w_rot_b;
+
+        let w_sum = w_a + w_b;
+
+        let restitution_velocity = (-restitution * pre_solve_normal_vel).min(0.);
+        let vel_impulse = n * ((-normal_vel + restitution_velocity) / w_sum);
+
+        vel_a.0 += vel_impulse / mass_a.0;
+        vel_b.0 -= vel_impulse / mass_b.0;
+
+        ang_vel_a.0 += i_inv_a * r_a.perp_dot(vel_impulse);
+        ang_vel_b.0 += i_inv_b * r_b.perp_dot(-vel_impulse);
     }
 }
 

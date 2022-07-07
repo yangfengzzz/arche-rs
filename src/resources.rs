@@ -1,7 +1,16 @@
 use bevy::prelude::*;
 
+#[derive(Debug, Clone)]
+pub struct BodyContact {
+    pub entity_a: Entity,
+    pub entity_b: Entity,
+    pub r_a: Vec2,
+    pub r_b: Vec2,
+    pub normal: Vec2,
+}
+
 #[derive(Default, Debug)]
-pub struct Contacts(pub Vec<(Entity, Entity, Vec2)>);
+pub struct Contacts(pub Vec<BodyContact>);
 
 #[derive(Default, Debug)]
 pub struct StaticContacts(pub Vec<(Entity, Entity, Vec2)>);

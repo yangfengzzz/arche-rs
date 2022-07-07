@@ -36,6 +36,7 @@ pub struct DynamicBoxBundle {
     pub collider: BoxCollider,
     pub vel: Vel,
     pub ang_vel: AngVel,
+    pub pre_solve_ang_vel: PreSolveAngVel,
     pub pre_solve_vel: PreSolveVel,
     pub restitution: Restitution,
     pub aabb: Aabb,

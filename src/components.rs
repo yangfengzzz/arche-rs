@@ -6,6 +6,9 @@ pub struct Pos(pub Vec2);
 #[derive(Component, Debug, Default)]
 pub struct PrevPos(pub Vec2);
 
+#[derive(Component, Debug, Default)]
+pub struct PreSolveAngVel(pub(crate) f32);
+
 #[derive(Component, Debug)]
 pub struct Mass(pub f32);
 

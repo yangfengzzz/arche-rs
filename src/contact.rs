@@ -11,6 +11,7 @@ pub struct Contact {
     pub r_b: Vec2,
 }
 
+
 fn make_isometry(rotation: Rot, translation: Vec2) -> parry2d::math::Isometry<f32> {
     parry2d::math::Isometry::<f32> {
         rotation: UnitComplex::new(rotation.into()),
