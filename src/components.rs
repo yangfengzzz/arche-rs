@@ -44,17 +44,27 @@ pub struct Vel(pub(crate) Vec2);
 #[derive(Component, Debug, Default)]
 pub struct PreSolveVel(pub(crate) Vec2);
 
-#[derive(Default, Debug)]
-pub struct Contacts(pub Vec<(Entity, Entity, Vec2)>);
-
-#[derive(Default, Debug)]
-pub struct StaticContacts(pub Vec<(Entity, Entity, Vec2)>);
-
 #[derive(Component, Debug)]
 pub struct Restitution(pub f32);
 
 impl Default for Restitution {
     fn default() -> Self {
         Self(0.3)
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+#[derive(Default, Debug)]
+pub struct Contacts(pub Vec<(Entity, Entity, Vec2)>);
+
+#[derive(Default, Debug)]
+pub struct StaticContacts(pub Vec<(Entity, Entity, Vec2)>);
+
+#[derive(Debug)]
+pub struct Gravity(pub Vec2);
+
+impl Default for Gravity {
+    fn default() -> Self {
+        Self(Vec2::new(0., -9.81))
     }
 }

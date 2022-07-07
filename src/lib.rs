@@ -9,15 +9,6 @@ use bevy::{core::FixedTimestep, prelude::*};
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 struct FixedUpdateStage;
 
-#[derive(Debug)]
-pub struct Gravity(pub Vec2);
-
-impl Default for Gravity {
-    fn default() -> Self {
-        Self(Vec2::new(0., -9.81))
-    }
-}
-
 pub const DELTA_TIME: f32 = 1. / 60.;
 
 pub fn startup(
